@@ -11,7 +11,7 @@ namespace Mobius
         }
 
         int pos, last;
-        bool _bigEndian;
+        readonly bool _bigEndian;
 
         public override short ReadInt16() => _bigEndian ? (short)((ReadByte() << 8) | ReadByte()) : base.ReadInt16();
 

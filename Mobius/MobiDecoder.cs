@@ -79,7 +79,7 @@ namespace Mobius
             YUV = new int[6].Select(_ => new[] { new Block(_width, _height), new Block(_width / 2, _height / 2), new Block(_width / 2, _height / 2) }).ToArray();
         }
 
-        public IEnumerable<byte[]> Parse(Stream stream)
+        public byte[] Decode(Stream stream)
         {
             br = new BitReader(stream, false);
             YUV = YUV.Skip(5).Concat(YUV.Take(5)).ToArray();
@@ -124,10 +124,11 @@ namespace Mobius
                 }
             }
 
+            var recolor = YUV[0];
             if (!_isMoflex)
             {
                 // quick hack for converting mods YUV to the standard YUV
-                var recolor = YUV[0].Select(channel => new Block(channel.Width, channel.Height)).ToList();
+                recolor = YUV[0].Select(channel => new Block(channel.Width, channel.Height)).ToArray();
                 for (int y = 0; y < _height / 2; y++)
                     for (int x = 0; x < _width / 2; x++)
                     {
@@ -140,10 +141,9 @@ namespace Mobius
                                 recolor[0][2 * x + j, 2 * y + i] = Clamp(0.859 * YUV[0][0][2 * x + j, 2 * y + i]);
                         byte Clamp(double d) => (byte)Math.Max(0, Math.Min(255, d));
                     }
-                return recolor.SelectMany(channel => channel.Array);
             }
 
-            return YUV[0].SelectMany(channel => channel.Array);
+            return recolor.SelectMany(channel => channel.Array).SelectMany(x => x).ToArray();
         }
 
         void SetupQuantizationTables(int quantizer)
@@ -457,7 +457,7 @@ namespace Mobius
                                         orderby x + y, (x + y + 1) % 2 * x
                                         select (byte)(8 * y + x)).ToArray();
 
-        static int[][] Quant4x4 =
+        static readonly int[][] Quant4x4 =
         {
             new[] { 10, 13, 13, 10, 16, 10, 13, 13, 13, 13, 16, 10, 16, 13, 13, 16 },
             new[] { 11, 14, 14, 11, 18, 11, 14, 14, 14, 14, 18, 11, 18, 14, 14, 18 },
@@ -467,7 +467,7 @@ namespace Mobius
             new[] { 18, 23, 23, 18, 29, 18, 23, 23, 23, 23, 29, 18, 29, 23, 23, 29 },
         };
 
-        static int[][] Quant8x8 =
+        static readonly int[][] Quant8x8 =
         {
             new[] {
                 20, 19, 19, 25, 18, 25, 19, 24, 24, 19, 20, 18, 32, 18, 20, 19, 19, 24, 24, 19, 19, 25, 18, 25, 18, 25, 18, 25, 19, 24, 24, 19,
@@ -515,7 +515,7 @@ namespace Mobius
             0x30, 0x27, 0x2D, 0x25, 0x3A, 0x2B, 0x2E, 0x2A, 0x31, 0x34, 0x38, 0x32, 0x29, 0x26, 0x39, 0x36
         };
 
-        static Dictionary<int, ushort>[] HuffmanTree = new[]
+        static readonly Dictionary<int, ushort>[] HuffmanTree = new[]
         {
             new Dictionary<int, ushort>
             {
@@ -559,7 +559,7 @@ namespace Mobius
             }
         };
 
-        static int[][] RunResidue =
+        static readonly int[][] RunResidue =
         {
             new[]
             {
@@ -585,7 +585,7 @@ namespace Mobius
             }
         };
 
-        static string[] MotionPredictTableMods =
+        static readonly string[] MotionPredictTableMods =
         {
             "....1..0..89.............27.....................43....56........",
             "....0..1..9.2.........54..38....",
@@ -605,7 +605,7 @@ namespace Mobius
             ".....10.54....32"
         };
 
-        static string[] MotionPredictTableMoflex =
+        static readonly string[] MotionPredictTableMoflex =
         {
             "...0....8.1.......2....9..............36....7.............................................54....................................",
             "....9.1...2...80......3.......................54................",

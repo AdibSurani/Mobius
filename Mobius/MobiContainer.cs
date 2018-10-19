@@ -1,44 +1,42 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Mobius
 {
     class MobiContainer
     {
-        public class Frame
+        static IEnumerable<Frame> GetChunks(BitReader br)
         {
-            public int Width { get; set; }
-            public int Height { get; set; }
-            public double Fps { get; set; }
-            public MemoryStream Stream { get; set; } = new MemoryStream();
-            public string Stereo { get; set; }
-        }
-
-        public class MoflexFrame : Frame
-        {
-            byte _type;
-            byte[] _data;
-            public bool IsVideo => _type % 2 == 1;
-            static string[] stereoTypes = { "al", "ar", "abl", "abr", "sbsl", "sbsr", null };
-
-            public MoflexFrame(byte type, byte[] data)
+            while (true)
             {
-                _type = type;
-                _data = data;
-
-                if (!IsVideo) return;
-                Fps = (double)((_data[2] << 8) + _data[3]) / ((_data[4] << 8) + _data[5]);
-                Width = (_data[6] << 8) + _data[7];
-                Height = (_data[8] << 8) + _data[9];
-                if (data.Length > 12) Stereo = stereoTypes[_data[12] & 0xF];
+                var type = br.ReadByte();
+                var bytes = br.ReadBytes(br.ReadByte());
+                switch (type)
+                {
+                    case 0:
+                        yield break;
+                    case 1:
+                    case 3:
+                        yield return new MoflexVideoFrame(bytes);
+                        break;
+                    case 2:
+                        yield return new MoflexAudioFrame(bytes);
+                        break;
+                    case 4:
+                        yield return new MoflexTimelineFrame(bytes);
+                        break;
+                    default:
+                        throw new NotImplementedException($"Unknown chunk type {type}");
+                }
             }
         }
 
         static IEnumerable<Frame> DemuxMoflex(Stream stream)
         {
             int packetSize = 0;
-            var chunks = new List<MoflexFrame>();
+            var chunks = new List<Frame>();
 
             using (var br = new BitReader(stream, true))
                 while (br.BaseStream.Position < br.BaseStream.Length)
@@ -49,16 +47,7 @@ namespace Mobius
                     {
                         var unknown = br.ReadBytes(10);
                         packetSize = br.ReadInt16() + 1;
-                        chunks.Clear();
-
-                        while (true)
-                        {
-                            var type = br.ReadByte();
-                            if (type > 4) throw new NotImplementedException("Unknown chunk type");
-                            var bytes = br.ReadBytes(br.ReadByte());
-                            if (type == 0) break;
-                            chunks.Add(new MoflexFrame(type, bytes));
-                        }
+                        chunks = GetChunks(br).ToList();
                     }
                     else
                         br.BaseStream.Position -= 2;
@@ -79,8 +68,7 @@ namespace Mobius
                         if (last)
                         {
                             frame.Stream.Position = 0;
-                            if (frame.IsVideo)
-                                yield return frame; // we have a complete frame -- let's do stuff to it
+                            yield return frame;
                             frame.Stream = new MemoryStream();
                         }
                     }
@@ -96,7 +84,7 @@ namespace Mobius
             {
                 br.ReadBytes(8);
                 var frameCount = br.ReadInt32();
-                var frame = new Frame
+                var frame = new VideoFrame
                 {
                     Width = br.ReadInt32(),
                     Height = br.ReadInt32(),
@@ -105,6 +93,7 @@ namespace Mobius
                 br.ReadBytes(16);
                 stream.Position = br.ReadInt32() + 4;
                 stream.Position = br.ReadInt32();
+                Console.WriteLine(frameCount);
                 for (int i = 0; i < frameCount; i++)
                 {
                     frame.Stream = new MemoryStream(br.ReadBytes(br.ReadInt32() >> 14));
@@ -123,6 +112,43 @@ namespace Mobius
                 case (byte)'L': return DemuxMoflex(stream);
                 case (byte)'M': return DemuxMods(stream);
                 default: throw new NotSupportedException("Unknown filetype");
+            }
+        }
+
+        public static List<Frame> GetHeaders(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            {
+                var b = stream.ReadByte();
+                stream.Position--;
+                if (b == 'L')
+                {
+                    using (var br = new BitReader(stream, true))
+                    {
+                        br.ReadBytes(14);
+                        return GetChunks(br).ToList();
+                    }
+                }
+                else if (b == 'M')
+                {
+                    using (var br = new BinaryReader(stream))
+                    {
+                        br.ReadBytes(12);
+                        return new List<Frame>
+                        {
+                            new VideoFrame
+                            {
+                                Width = br.ReadInt32(),
+                                Height = br.ReadInt32(),
+                                Fps = br.ReadInt32() / (double)0x1000000
+                            }
+                        };
+                    }
+                }
+                else
+                {
+                    throw new NotSupportedException("Unknown filetype");
+                }
             }
         }
     }
